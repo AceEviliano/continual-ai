@@ -3,30 +3,18 @@ import sklearn.metrics as Metrics
 from collections import defaultdict
 import torch
 
-class AddPreds():
-
-    def __call__(self, log, phase, data):
-        preds = data['preds'].cpu().detach().numpy()
-        trues = data['trues'].cpu().detach().numpy()
-
-        task = log.curr_task
-        if (log.E+1) > len(log.task[task]['data']):
-            log.task[task]['data'].append({ 
-                                        'train': { 'preds': [],
-                                                    'trues': [] },
-                                        'test' : { 'preds': [],
-                                                    'trues': [] } 
-                                    })
-        
-        log.task[task]['data'][log.E][phase]['preds'].append(preds)
-        log.task[task]['data'][log.E][phase]['trues'].append(trues)
-        return
-
-
 
 class Print():
 
     def __init__(self, frequency=1):
+        '''
+        Displays info regarding which phase of the training is going.
+        A generic callback that can be added for any phase callback.
+        Does not take any pay load during the call.
+
+        Init Prams:
+            frequency: Parameter to control the output update frequency.
+        '''
         self.frequency = frequency
         self.C = {
             'BF': '\033[1m',
@@ -34,67 +22,37 @@ class Print():
         }
         return
 
-    def __call__(self, log, phase=None, taskname=None, data=None):
+    def __call__(self, log, phase=None):
         if phase != None:
-            if log.S[phase]%self.frequency == 0:
-                print(f'{self.C["BF"]}Completed phase:{self.C["END"]} {phase} {self.C["BF"]}step:{self.C["END"]} {log.S[phase]}')
-        elif taskname != None:
-                print(f'\n\n {self.C["BF"]}Task:{self.C["END"]} {log.curr_task}\n\n')
+            if log.S[phase] % self.frequency == 0:
+                print(
+                    f'{self.C["BF"]}Completed phase:{self.C["END"]} {phase} {self.C["BF"]}step:{self.C["END"]} {log.S[phase]}')
         else:
-            if log.E%self.frequency == 0:
-                print(f'\n{self.C["BF"]}Completed epoch:{self.C["END"]} {log.E}\n')
+            if log.E % self.frequency == 0:
+                print(
+                    f'\n{self.C["BF"]}Completed epoch:{self.C["END"]} {log.E}\n')
         return
-
 
 
 class PrintMetrics():
 
     def __init__(self, metrics=None, frequency=1):
-
+        '''
+        '''
         self.frequency = frequency
         if metrics == None:
-            self.metrics = { 'accuracy': (Metrics.accuracy_score,{}) }
+            self.metrics = {'accuracy': (Metrics.accuracy_score, {})}
         else:
             self.metrics = metrics
         return
 
-
-    def __call__(self, log, phase=None, data=None):      
-
-        s = ''
-        task = log.curr_task
-        if phase!=None:
-            preds = log.task[task]['data'][log.E][phase]['preds']
-            trues = log.task[task]['data'][log.E][phase]['trues']
-        else:
-            preds = log.task[task]['data'][log.E-1]['test']['preds']
-            trues = log.task[task]['data'][log.E-1]['test']['trues']
-
-        if len(preds) == 1:
-            preds, trues = preds[0], trues[0]
-        else:
-            preds = np.concatenate(preds, axis=0)
-            trues = np.concatenate(trues, axis=0)
-
-        printout = ''
-        for k, (metric, kwargs) in self.metrics.items():
-            v = metric(preds, trues, **kwargs)
-            printout += f'{k}: {v:.2f}\t'
-
-        if phase != None:
-            if log.S[phase]%self.frequency == 0:
-                print(printout)
-        else:
-            if log.E%self.frequency == 0:
-                print(printout)
-
+    def __call__(self, log, phase=None):
         return
-
 
 
 class SaveLog():
 
-    def __init__(self, savepath='untitled.log', frequency=1, 
+    def __init__(self, savepath='untitled.log', frequency=1,
                  reduced=False, metrics=None, phase=['train', 'test']):
 
         self.savepath = savepath
@@ -102,18 +60,16 @@ class SaveLog():
         self.reduced = reduced
         self.metrics = metrics
         self.phase = phase
-        assert (reduced and metrics!=None) or (not reduced), "provide metrics for reduced"
+        assert (reduced and metrics != None) or (
+            not reduced), "provide metrics for reduced"
 
         return
 
-
     def __call__(self, log, data):
-
-        import copy
         if log.E-1 == 0:
             self.save_dict = copy.deepcopy(log.task)
             self.save_dict[log.curr_task]['data'] = []
-                       
+
         task = log.curr_task
         for p in self.phase:
             for keys in ['preds', 'trues']:
@@ -121,8 +77,7 @@ class SaveLog():
                 if type(v[0]) != int:
                     v = np.concatenate(v).tolist()
                 log.task[task]['data'][log.E-1][p][keys] = v
-    
-        
+
         if self.reduced:
             m = defaultdict(dict)
             for p in self.phase:
@@ -133,10 +88,9 @@ class SaveLog():
 
             self.save_dict[task]['data'].append(m)
 
-
-        if log.E%self.frequency != 0:
+        if log.E % self.frequency != 0:
             return
-        
+
         import json
         with open(self.savepath, 'w') as fp:
             if self.reduced:
@@ -149,18 +103,39 @@ class SaveLog():
 
 class SaveModel():
 
-    def __init__(self, metric=(Metrics.accuracy_score, {}) ):
-        self.metric = metric
+    def __init__(self, metric=None):
+        '''
+        Saves the model in pytorch format ('.pt').
+        An Epoch phase Callback. Takes a data payload at call.
+
+        Init Params:
+            metric: metric used to choose the optimal model. Savemodel callbacks
+            with different metrics can be used to save different optimal models
+            for that score.
+
+        Callback Params:
+            data: {
+                'savepath': 'dir/to/save/model',
+                'k1': v1, ...
+            }
+            A dictionary with atleast 'savepath' key passed at end of every epoch. 
+            Saves only the optimal model based on the initialized metric. The metric
+            is evaluated on the test preds.
+        '''
+        if metric == None:
+            self.metric = (Metrics.accuracy_score, {})
+        else:
+            self.metric = metric
         self.max_score = 0.
         return
 
-    def __call__(self, log, data=None):
-        
-        task = log.curr_task
-        savepath = data['savepath']
+    def __call__(self, log):
 
-        preds = log.task[task]['data'][log.E-1]['test']['preds']
-        trues = log.task[task]['data'][log.E-1]['test']['trues']
+        data  = log.epoch[-1]['data']
+        
+        preds = log.epoch[-1]['step']['preds']
+        trues = log.epoch[-1]['step']['trues']
+        
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
 
@@ -176,12 +151,16 @@ class SaveModel():
         return
 
 
-
 class Timer():
 
     def __init__(self):
+        '''
+        Displays time taken per epoch. 
+        A Epoch phase callback, does not take any data payload.
+        [Needs to updated as a generic callback].
+        '''
         self.start = 0.
-    
+
     def __call__(self, log, data=None):
         import time
         self.end = time.time()
