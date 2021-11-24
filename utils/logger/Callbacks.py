@@ -47,6 +47,7 @@ class PrintMetrics():
         return
 
     def __call__(self, log, phase=None):
+
         return
 
 
@@ -132,9 +133,10 @@ class SaveModel():
     def __call__(self, log):
 
         data  = log.epoch[-1]['data']
+        savepath = log.epoch[-1]['data']['savepath']
         
-        preds = log.epoch[-1]['step']['preds']
-        trues = log.epoch[-1]['step']['trues']
+        preds = 0
+        trues = 0
         
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
@@ -164,7 +166,7 @@ class Timer():
     def __call__(self, log, data=None):
         import time
         self.end = time.time()
-        if log.E > 1:
+        if log.E > 0:
             print(f'Epoch time: {self.end-self.start:.2f}(s)')
         self.start = self.end
         return
