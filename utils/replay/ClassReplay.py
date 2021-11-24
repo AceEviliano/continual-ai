@@ -9,38 +9,27 @@ class ClassExemplarReplay( Dataset ):
 
     
     def __init__(self, handout, budget=1):
-        
+        '''
+        '''
         self.budget = budget
         self.handout = handout
-        self.memory = OrderedDict()
-        self.mem_size = defaultdict(lambda : 0)
+        self.memory = []
+        self.indices = defaultdict(list)
         return
         
         
     def add(self, sample):
-        
+        '''
+        '''
         classid = sample['classid']
         self.strategy(sample, classid)
         return
     
-    
-    def get_index(self, inx):
-        
-        i=0
-        for k,v in self.mem_size.items():
-            i+=v
-            if i>inx:
-                i-=v
-                break
-        
-        i = inx - i
-        return k, i
-    
-    
+   
     def __getitem__(self, inx):
-        k, inx = self.get_index(inx)
-        mem_sample = self.memory[k][inx]
-        
+        '''
+        '''
+        mem_sample = self.memory[inx]
         sample = []
         for key in self.handout:
             sample.append(mem_sample[key]) 
@@ -49,10 +38,14 @@ class ClassExemplarReplay( Dataset ):
         
     
     def __len__(self):
-        return sum(self.mem_size.values())
+        '''
+        '''
+        return len(self.memory)
     
     
     def strategy(self, sample, classid):
+        '''
+        '''
         raise NotImplementedError
     
     
@@ -60,86 +53,82 @@ class ClassExemplarReplay( Dataset ):
 class ClassRecentReplay( ClassExemplarReplay ):
     
     def __init__(self, handout, budget=1):
+        '''
+        Replaces the oldest sample for the class with the incoming sample of
+        that class.
         
+        Params:
+            handount: keys corresponding to the values in the sample dictionary
+            that needs to be returned during __getitem__.
+            budget: number of samples that can be held per class.
+        '''
         super().__init__(handout, budget)
         return
     
     
     def strategy(self, sample, classid):
         
-        if classid not in self.memory.keys():
-            self.memory[classid] = []
+        if classid not in self.indices.keys():
+            self.indices[classid] = []
         
-        if len(self.memory[classid]) < self.budget:
-            self.memory[classid] += [sample]
-            self.mem_size[classid] += 1
+        if len(self.indices[classid]) < self.budget:
+            self.memory.append(sample)
+            self.indices[classid].append(len(self.memory)-1)            
         else:
-            self.memory[classid].pop(0)
-            self.memory[classid] += [sample]
+            inx = self.indices[classid][0]
+            self.memory[inx] = sample
+            inx = self.indices[classid].pop(0)
+            self.indices[classid].append(inx)
             
         return
+
+
+class ClassRandomReplay( ClassExemplarReplay ):
     
-    
-    
-class ClassHardestReplay( ClassExemplarReplay ):
-    
-    def __init__(self, handout, budget=1, gamma=0.1):
+    def __init__(self, handout, budget=1, p=0.5):
+        '''
+        An incoming sample replaces one of the existing samples randomly with
+        probability 'p' if memory buffer for the class is full.
         
+        Params:
+            handount: keys corresponding to the values in the sample dictionary
+            that needs to be returned during __getitem__.
+            budget: number of samples that can be held per class.
+            p: probability for random retention of the new sample.            
+        '''
         super().__init__(handout, budget)
-        
-        self.gamma = gamma
-        self.prototypes = defaultdict(lambda : None)  
+        self.p = p
         return
     
-    
-    def preupdate(self, classid):
-        
-        features = [ ex['feature'] for ex in self.memory[classid] ]
-        new_ptype = torch.mean(torch.stack(features))
-        
-        old_ptype = self.prototypes[classid]
-        new_ptype = (self.gamma)*new_ptype + (1-self.gamma)*old_ptype
-        self.prototypes[classid] = new_ptype
-        
-        ptype = self.prototypes[classid]
-        for inx in range(len(self.memory[classid])):
-            sample = self.memory[classid][inx]
-            self.memory[classid][inx]['dist'] = linalg.norm(ptype - sample['feature'])
-        
-        return
-    
-    
-    def postupdate(self, classid):
-        
-        features = [ ex['feature'] for ex in self.memory[classid] ]
-        self.prototypes[classid] = torch.mean(torch.stack(features))
-        
-        ptype = self.prototypes[classid]
-        for inx in range(len(self.memory[classid])):
-            sample = self.memory[classid][inx]
-            self.memory[classid][inx]['dist'] = linalg.norm(ptype - sample['feature'])
-            
-        return
-        
     
     def strategy(self, sample, classid):
-            
-        if classid not in self.memory.keys():
-            self.memory[classid] = [ sample ]
-        else:
-            self.memory[classid] += [ sample ]
-            
-        if self.prototypes[classid] is None:
-            self.prototypes[classid] = sample['feature']
         
-        self.preupdate(classid)
+        if classid not in self.indices.keys():
+            self.indices[classid] = []
         
-        if len(self.memory[classid]) <= self.budget:
-            self.mem_size[classid] += 1
-        else:
-            maxinx = np.argmin([ex['dist'] for ex in self.memory[classid]])
-            self.memory[classid].pop(maxinx)
-            
-        self.postupdate(classid)
+        if len(self.indices[classid]) < self.budget:
+            self.memory.append(sample)
+            self.indices[classid].append(len(self.memory)-1)            
+        elif np.random.random() < self.p:
+            inx = np.random.choice(self.indices[classid])
+            self.memory[inx] = sample
             
         return
+     
+  
+
+if __name__ == '__main__':
+    
+    rpm = ClassRandomReplay(['img', 'classid'], budget=2)
+    
+    rpm.add({'img':'abc', 'classid':0})
+    rpm.add({'img':'cab', 'classid':0})
+    rpm.add({'img':'jkl', 'classid':1})
+    rpm.add({'img':'bac', 'classid':0})
+    rpm.add({'img':'lkj', 'classid':1})
+    rpm.add({'img':'kjl', 'classid':1})
+    
+    print(rpm.__dict__)
+    
+    
+    
