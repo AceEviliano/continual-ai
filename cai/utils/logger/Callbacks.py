@@ -9,7 +9,7 @@ class Print():
     def __init__(self, frequency=1):
         '''
         Displays info regarding which phase of the training is going.
-        A generic callback that can be added for any phase callback.
+        A generic callback that can be added as any phase callback.
         Does not take any pay load during the call.
 
         Init Prams:
@@ -48,6 +48,25 @@ class PrintMetrics():
 
     def __call__(self, log, phase=None):
 
+        if phase == None:
+            phase = 'test'
+            iterator = log.epoch[log.E-1]['step']
+        else:
+            iterator = log.step
+            
+        preds, trues = [], []
+        for d in iterator[phase]:
+            preds.append(d['preds'])
+            trues.append(d['trues'])
+            
+        preds = np.concatenate(preds)
+        trues = np.concatenate(trues)
+        
+        for name, m in self.metrics.items():
+            metric, kwargs = m
+            score = metric(preds, trues, **kwargs)
+            print(f'{name}: {score}')
+            
         return
 
 
