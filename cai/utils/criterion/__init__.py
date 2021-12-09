@@ -1,1 +1,1 @@
-from .Criterion import *
+from .riterion import *
